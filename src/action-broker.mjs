@@ -45,7 +45,7 @@ function boundedString(value, name, max = 4_000) {
 function loadConfig(filename) {
   if (!filename || !fs.existsSync(filename)) return { base: process.cwd(), document: {} };
   const stat = fs.statSync(filename);
-  if (!stat.isFile() || (stat.mode & 0o002) !== 0) throw new Error("Action grants must be a regular file that is not world-writable.");
+  if (!stat.isFile() || (stat.mode & 0o077) !== 0) throw new Error("Action grants must be a regular file accessible only by its owner (mode 600).");
   let document;
   try { document = JSON.parse(fs.readFileSync(filename, "utf8")); }
   catch { throw new Error("Action grants are not valid JSON."); }
@@ -125,7 +125,7 @@ export class ActionBroker {
       if (!/^[a-z][a-z0-9_-]{0,79}$/.test(name) || typeof item.executable !== "string") continue;
       const executable = path.resolve(base, item.executable);
       let safe = false;
-      try { const stat = fs.statSync(executable); safe = stat.isFile() && (stat.mode & 0o111) !== 0 && (stat.mode & 0o002) === 0; } catch { safe = false; }
+      try { const stat = fs.statSync(executable); safe = stat.isFile() && (stat.mode & 0o111) !== 0 && (stat.mode & 0o022) === 0; } catch { safe = false; }
       if (!safe) continue;
       this.connectors[name] = {
         executable,
@@ -167,13 +167,24 @@ export class ActionBroker {
     return root;
   }
 
-  #existingPath(root, value) {
+  #existingPath(root, value, strict = false) {
     const requested = path.resolve(root.path, boundedString(value, "path", 1_000));
     if (!within(root.path, requested)) throw Object.assign(new Error("The path leaves its granted root."), { code: "path_outside_root" });
     let real;
     try { real = fs.realpathSync(requested); }
     catch { throw Object.assign(new Error("The requested path does not exist."), { code: "path_not_found" }); }
     if (!within(root.path, real)) throw Object.assign(new Error("The resolved path leaves its granted root."), { code: "path_outside_root" });
+    if (strict && real !== requested) throw Object.assign(new Error("Destructive actions do not follow symbolic links."), { code: "symlink_denied" });
+    return real;
+  }
+
+  #recoveryDirectory(root, name) {
+    const directory = path.join(root.path, name);
+    if (!fs.existsSync(directory)) fs.mkdirSync(directory, { mode: 0o700 });
+    const stat = fs.lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw Object.assign(new Error("The recovery directory is not a safe local directory."), { code: "recovery_path_denied" });
+    const real = fs.realpathSync(directory);
+    if (!within(root.path, real)) throw Object.assign(new Error("The recovery directory leaves its granted root."), { code: "path_outside_root" });
     return real;
   }
 
@@ -182,6 +193,10 @@ export class ActionBroker {
     if (!within(root.path, requested)) throw Object.assign(new Error("The path leaves its granted root."), { code: "path_outside_root" });
     const parent = fs.realpathSync(path.dirname(requested));
     if (!within(root.path, parent)) throw Object.assign(new Error("The resolved parent leaves its granted root."), { code: "path_outside_root" });
+    const relative = path.relative(root.path, requested);
+    if (relative === ".winch-backups" || relative.startsWith(`.winch-backups${path.sep}`) || relative === ".winch-trash" || relative.startsWith(`.winch-trash${path.sep}`)) {
+      throw Object.assign(new Error("WINCH recovery directories are reserved."), { code: "reserved_path" });
+    }
     return path.join(parent, path.basename(requested));
   }
 
@@ -208,22 +223,40 @@ export class ActionBroker {
         const content = typeof args.content === "string" && args.content.length <= 1_000_000 ? args.content : null;
         if (content === null) throw Object.assign(new Error("File content must be text under 1 MB."), { code: "invalid_arguments" });
         const overwrite = args.overwrite === true;
-        fs.writeFileSync(target, content, { encoding: "utf8", mode: 0o600, flag: overwrite ? "w" : "wx" });
-        return { summary: "File written", output: { root: root.name, path: path.relative(root.path, target), bytes: Buffer.byteLength(content), overwrite } };
+        const existed = fs.existsSync(target);
+        if (existed && !overwrite) throw Object.assign(new Error("The destination already exists and overwrite was not approved."), { code: "target_exists" });
+        if (existed && fs.lstatSync(target).isDirectory()) throw Object.assign(new Error("A directory cannot be overwritten as a file."), { code: "invalid_target" });
+        const temporary = path.join(path.dirname(target), `.winch-write-${crypto.randomBytes(8).toString("hex")}`);
+        let backup = null;
+        try {
+          if (existed) {
+            const backupDirectory = this.#recoveryDirectory(root, ".winch-backups");
+            backup = path.join(backupDirectory, `${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${path.basename(target)}`);
+            fs.renameSync(target, backup);
+          }
+          fs.writeFileSync(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+          fs.renameSync(temporary, target);
+        } catch (error) {
+          if (fs.existsSync(temporary)) fs.rmSync(temporary, { force: true });
+          if (backup && !fs.existsSync(target) && fs.existsSync(backup)) fs.renameSync(backup, target);
+          throw error;
+        }
+        return { summary: "File written", output: { root: root.name, path: path.relative(root.path, target), bytes: Buffer.byteLength(content), overwrite, recoveryPath: backup ? path.relative(root.path, backup) : null } };
       }
       case "files.move": {
         const root = this.#root(boundedString(args.root, "root", 40), true);
-        const source = this.#existingPath(root, args.from);
+        const source = this.#existingPath(root, args.from, true);
+        if (source === root.path) throw Object.assign(new Error("A granted root cannot be moved."), { code: "invalid_target" });
         const destination = this.#writePath(root, args.to);
+        if (fs.existsSync(destination)) throw Object.assign(new Error("The move destination already exists."), { code: "target_exists" });
         fs.renameSync(source, destination);
         return { summary: "File moved", output: { root: root.name, from: path.relative(root.path, source), to: path.relative(root.path, destination) } };
       }
       case "files.trash": {
         const root = this.#root(boundedString(args.root, "root", 40), true);
-        const source = this.#existingPath(root, args.path);
+        const source = this.#existingPath(root, args.path, true);
         if (source === root.path) throw Object.assign(new Error("A granted root cannot be trashed."), { code: "invalid_target" });
-        const trash = path.join(root.path, ".winch-trash");
-        fs.mkdirSync(trash, { mode: 0o700 });
+        const trash = this.#recoveryDirectory(root, ".winch-trash");
         const destination = path.join(trash, `${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${path.basename(source)}`);
         fs.renameSync(source, destination);
         return { summary: "Item moved to recoverable trash", output: { root: root.name, original: path.relative(root.path, source), recoveryPath: path.relative(root.path, destination) } };
@@ -285,7 +318,7 @@ export class ActionBroker {
         const executable = typeof recipe.executable === "string" ? path.resolve(recipe.executable) : "";
         let stat;
         try { stat = fs.statSync(executable); } catch { stat = null; }
-        if (!stat?.isFile() || (stat.mode & 0o111) === 0 || (stat.mode & 0o002) !== 0) throw Object.assign(new Error("The command recipe is not executable or safely configured."), { code: "target_not_granted" });
+        if (!stat?.isFile() || (stat.mode & 0o111) === 0 || (stat.mode & 0o022) !== 0) throw Object.assign(new Error("The command recipe is not executable or safely configured."), { code: "target_not_granted" });
         const input = typeof args.input === "string" && args.input.length <= 4_000 ? args.input : "";
         const recipeArgs = Array.isArray(recipe.args) ? recipe.args.filter((item) => typeof item === "string" && item.length <= 500).slice(0, 30).map((item) => item.replaceAll("{{input}}", input)) : [];
         const { stdout } = await execFileAsync(executable, recipeArgs, { timeout: Math.min(300_000, Math.max(1_000, Number(recipe.timeoutMs) || 60_000)), maxBuffer: 1_000_000, env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" } });
@@ -300,7 +333,7 @@ export class ActionBroker {
         try { command = (await execFileAsync("/usr/bin/which", ["codex"], { timeout: 5_000 })).stdout.trim(); }
         catch { throw Object.assign(new Error("Codex is not installed or discoverable."), { code: "harness_unavailable" }); }
         const stat = fs.statSync(command);
-        if (!stat.isFile() || (stat.mode & 0o111) === 0 || (stat.mode & 0o002) !== 0) throw Object.assign(new Error("The Codex executable failed validation."), { code: "harness_unavailable" });
+        if (!stat.isFile() || (stat.mode & 0o111) === 0 || (stat.mode & 0o022) !== 0) throw Object.assign(new Error("The Codex executable failed validation."), { code: "harness_unavailable" });
         const { stdout } = await execFileAsync(command, ["exec", "--ephemeral", "--sandbox", "workspace-write", "--skip-git-repo-check", "--cd", requestedPath, prompt], {
           timeout: 900_000, maxBuffer: 2_000_000,
           env: { HOME: process.env.HOME || "", PATH: process.env.PATH || "/usr/bin:/bin", TMPDIR: process.env.TMPDIR || os.tmpdir() }
@@ -337,10 +370,12 @@ export class ActionBroker {
         const method = String(args.method || "GET").toUpperCase();
         if (!profile.methods.has(method)) throw Object.assign(new Error("The HTTP method is not granted for this API."), { code: "target_not_granted" });
         const requestedPath = boundedString(args.path, "path", 2_000);
-        if (!requestedPath.startsWith("/") || requestedPath.startsWith("//") || !profile.pathPrefixes.some((prefix) => requestedPath.startsWith(prefix))) throw Object.assign(new Error("The API path is outside its granted prefixes."), { code: "target_not_granted" });
+        if (!requestedPath.startsWith("/") || requestedPath.startsWith("//")) throw Object.assign(new Error("The API path is outside its granted prefixes."), { code: "target_not_granted" });
+        const url = new URL(requestedPath, profile.baseUrl.origin);
+        const pathGranted = profile.pathPrefixes.some((prefix) => prefix.endsWith("/") ? url.pathname.startsWith(prefix) : url.pathname === prefix || url.pathname.startsWith(`${prefix}/`));
+        if (url.origin !== profile.baseUrl.origin || !pathGranted) throw Object.assign(new Error("The normalized API path is outside its granted prefixes."), { code: "target_not_granted" });
         const secret = process.env[profile.apiKeyEnv];
         if (typeof secret !== "string" || !secret || secret.length > 8_000) throw Object.assign(new Error(`API key environment variable ${profile.apiKeyEnv} is missing or invalid.`), { code: "missing_api_key" });
-        const url = new URL(requestedPath, profile.baseUrl.origin);
         const query = plainObject(args.query);
         for (const [key, value] of Object.entries(query).slice(0, 100)) {
           if (!/^[A-Za-z0-9_.-]{1,100}$/.test(key) || !["string", "number", "boolean"].includes(typeof value)) throw Object.assign(new Error("API query parameters are invalid."), { code: "invalid_arguments" });

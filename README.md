@@ -61,11 +61,21 @@ WINCH_LIVE_HARNESSES=1
 WINCH_CODEX_ENABLED=1
 ```
 
+Protect the private environment file before starting WINCH:
+
+```bash
+chmod 600 .env
+```
+
 WINCH uses the already-authenticated `codex` executable in ephemeral, read-only proposal mode. Intent may leave the machine according to that provider's configuration and terms. Codex sees the public action catalog but receives no execution authority.
 
 ## Grant real actions
 
 Copy `config/action-grants.example.json` to the ignored `config/action-grants.json`. Grant only roots, hosts, applications, shortcuts, calendars, iMessage recipients, and fixed command recipes you have reviewed. Then enable the broker locally:
+
+```bash
+chmod 600 config/action-grants.json
+```
 
 ```dotenv
 WINCH_ACTIONS_ENABLED=1
@@ -86,6 +96,10 @@ For any key-based HTTP API, add a named profile under `apis` and enable `api.req
 ## Register another harness
 
 Copy `config/harnesses.example.json` to the ignored `config/harnesses.json`. Use an absolute executable path, leave the adapter disabled until reviewed, and expose only environment-variable names it needs.
+
+```bash
+chmod 600 config/harnesses.json
+```
 
 WINCH launches adapters with `execFile`, never a shell. The executable must be a regular executable file and cannot be world-writable. It receives a mode-`0600` request file:
 

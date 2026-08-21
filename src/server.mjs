@@ -42,8 +42,9 @@ const securityHeaders = Object.freeze({
   "x-frame-options": "DENY",
   "referrer-policy": "no-referrer",
   "cross-origin-resource-policy": "same-origin",
+  "cross-origin-opener-policy": "same-origin",
   "permissions-policy": "camera=(), geolocation=(), microphone=()",
-  "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+  "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; trusted-types 'none'; require-trusted-types-for 'script'"
 });
 
 function json(res, status, body) {
@@ -64,6 +65,8 @@ async function readBody(req) {
 }
 
 function assertLocalRequest(req) {
+  const remote = String(req.socket.remoteAddress || "").toLowerCase();
+  if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remote)) throw Object.assign(new Error("Remote client is not loopback."), { statusCode: 403 });
   let authority;
   try { authority = new URL(`http://${req.headers.host || ""}`); }
   catch { throw Object.assign(new Error("Invalid Host header."), { statusCode: 400 }); }
@@ -71,6 +74,7 @@ function assertLocalRequest(req) {
     throw Object.assign(new Error("Host is not allowed."), { statusCode: 403 });
   }
   if (req.method === "POST") {
+    if (req.headers["x-winch-request"] !== "1") throw Object.assign(new Error("Missing WINCH mutation header."), { statusCode: 403 });
     if (req.headers["sec-fetch-site"] === "cross-site") throw Object.assign(new Error("Cross-site requests are not allowed."), { statusCode: 403 });
     if (req.headers.origin) {
       let origin;
@@ -99,7 +103,9 @@ function stateResponse() {
 async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, stateResponse());
   if (req.method === "POST" && url.pathname === "/api/runs") {
+    if (!String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) throw Object.assign(new Error("Content-Type must be application/json."), { statusCode: 415 });
     const body = await readBody(req);
+    if (typeof body.intent !== "string") throw Object.assign(new Error("Intent must be a string."), { statusCode: 400 });
     await orchestrator.createRun(body.intent, { source: "web", preferredHarness: typeof body.preferredHarness === "string" ? body.preferredHarness : null });
     return json(res, 201, stateResponse());
   }
@@ -130,11 +136,20 @@ const server = http.createServer(async (req, res) => {
     if (!req.url?.startsWith("/")) throw Object.assign(new Error("Invalid request target."), { statusCode: 400 });
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
     if (url.pathname.startsWith("/api/")) await handleApi(req, res, url);
-    else serveStatic(res, url.pathname);
+    else if (req.method === "GET") serveStatic(res, url.pathname);
+    else json(res, 405, { error: "Method not allowed." });
   } catch (error) {
     if (!error.statusCode) console.error("WINCH request failed with an internal error.");
     json(res, error.statusCode || 500, { error: error.statusCode ? error.message : "Internal server error." });
   }
+});
+
+server.headersTimeout = 10_000;
+server.requestTimeout = 30_000;
+server.keepAliveTimeout = 5_000;
+server.maxRequestsPerSocket = 100;
+server.on("clientError", (_error, socket) => {
+  if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
 });
 
 server.listen(port, host, () => {

@@ -41,7 +41,7 @@ function synthetic(harness, intent, context) {
   return {
     summary: `${harness.name} produced a ${capability.replace("_", " ")} route`,
     result: `Simulation only: ${harness.name} ${language}. No external system was contacted and no side effect occurred.`,
-    proposedActions: [{ type: `${capability}.plan`, title: `Prepare a bounded plan for: ${intent.slice(0, 180)}`, risk: "informational" }]
+    proposedActions: []
   };
 }
 
