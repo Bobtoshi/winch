@@ -24,6 +24,10 @@ function safeCapabilities(values) {
 
 function loadCustom(filename, liveEnabled) {
   if (!filename || !fs.existsSync(filename)) return [];
+  try {
+    const configStat = fs.statSync(filename);
+    if (!configStat.isFile() || (configStat.mode & 0o077) !== 0) return [];
+  } catch { return []; }
   let document;
   try { document = JSON.parse(fs.readFileSync(filename, "utf8")); }
   catch { return []; }
@@ -35,7 +39,7 @@ function loadCustom(filename, liveEnabled) {
     let executable = false;
     try {
       const stat = fs.statSync(command);
-      executable = stat.isFile() && (stat.mode & 0o111) !== 0 && (stat.mode & 0o002) === 0;
+      executable = stat.isFile() && (stat.mode & 0o111) !== 0 && (stat.mode & 0o022) === 0;
     } catch { executable = false; }
     const capabilities = safeCapabilities(item.capabilities);
     if (!capabilities.length) continue;

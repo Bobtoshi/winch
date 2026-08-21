@@ -170,7 +170,7 @@ $("#run-form").addEventListener("submit", async (event) => {
   button.disabled = true;
   button.querySelector("span").textContent = "Routing…";
   try {
-    const response = await fetch("/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ intent, preferredHarness: $("#preferred").value || null }) });
+    const response = await fetch("/api/runs", { method: "POST", headers: { "content-type": "application/json", "x-winch-request": "1" }, body: JSON.stringify({ intent, preferredHarness: $("#preferred").value || null }) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Routing failed.");
     Object.assign(state, data);
@@ -186,7 +186,7 @@ $("#approval-list").addEventListener("click", async (event) => {
   if (!button) return;
   button.disabled = true;
   try {
-    const response = await fetch(`/api/${button.dataset.targetKind}/${encodeURIComponent(button.dataset.targetId)}/${button.dataset.decision}`, { method: "POST" });
+    const response = await fetch(`/api/${button.dataset.targetKind}/${encodeURIComponent(button.dataset.targetId)}/${button.dataset.decision}`, { method: "POST", headers: { "x-winch-request": "1" } });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Decision failed.");
     Object.assign(state, data);
