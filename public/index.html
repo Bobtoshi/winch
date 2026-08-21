@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0908">
+  <meta name="description" content="WINCH — one local control plane for every AI harness">
+  <link rel="icon" href="/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <title>WINCH — Harness control plane</title>
+</head>
+<body>
+  <div class="boot-line" aria-hidden="true"></div>
+  <div class="shell">
+    <aside class="rail">
+      <a class="brand" href="#command" aria-label="WINCH home"><span>W</span><strong>WINCH</strong></a>
+      <nav aria-label="Primary">
+        <a href="#command"><i>01</i><span>Command</span></a>
+        <a href="#route"><i>02</i><span>Route</span></a>
+        <a href="#harnesses"><i>03</i><span>Harnesses</span></a>
+        <a href="#ledger"><i>04</i><span>Ledger</span></a>
+      </nav>
+      <div class="rail-state"><span></span><div><small>SYSTEM MODE</small><b id="rail-mode">Simulation only</b></div></div>
+    </aside>
+
+    <main>
+      <header class="masthead">
+        <div><span class="kicker">LOCAL META-HARNESS / ACTION BROKER V2</span><h1>Direct the system.</h1></div>
+        <div class="system-readout"><span id="ready-count">0</span><small>HARNESS<br>ROUTES</small></div>
+      </header>
+
+      <section class="command" id="command">
+        <form id="run-form">
+          <label for="intent">One command. WINCH chooses the harness.</label>
+          <textarea id="intent" maxlength="4000" rows="2" placeholder="Compare three launch strategies, then verify the recommendation…" required></textarea>
+          <div class="command-controls">
+            <label class="route-choice" for="preferred"><span>ROUTING</span><select id="preferred"><option value="">Automatic</option></select></label>
+            <button class="dispatch" type="submit"><span>Route intent</span><b>↗</b></button>
+          </div>
+        </form>
+        <div class="examples">
+          <button type="button" data-intent="Research the market for private personal AI operators and compare the strongest positioning">Research market</button>
+          <button type="button" data-intent="Review this architecture for security gaps and verify the conclusions">Review architecture</button>
+          <button type="button" data-intent="Schedule a property viewing and send the confirmation email">Test approval route</button>
+        </div>
+      </section>
+
+      <section class="route-stage" id="route">
+        <div class="section-label"><span>ACTIVE ROUTE</span><small id="route-status">WAITING FOR INTENT</small></div>
+        <div id="route-track" class="route-track" aria-live="polite"></div>
+        <p id="route-rationale" class="route-rationale">WINCH will classify the intent, rank eligible harnesses, preserve fallbacks and attach a verifier when policy requires one.</p>
+      </section>
+
+      <div class="work-grid">
+        <div class="primary-work">
+          <section class="panel" id="approvals">
+            <div class="section-label"><span>HUMAN GATE · ROUTES + ACTIONS</span><small id="approval-count">0 WAITING</small></div>
+            <div id="approval-list" class="approval-list"></div>
+          </section>
+
+          <section class="panel output-panel">
+            <div class="section-label"><span>NORMALIZED OUTPUT</span><small id="output-harness">NO RECEIPT</small></div>
+            <div id="output" class="output"></div>
+          </section>
+
+          <section class="panel run-panel">
+            <div class="section-label"><span>RECENT RUNS</span><small>LOCAL HISTORY</small></div>
+            <ol id="run-list" class="run-list"></ol>
+          </section>
+        </div>
+
+        <aside class="registry" id="harnesses">
+          <div class="section-label"><span>HARNESS REGISTRY</span><small id="registry-count">0 REGISTERED</small></div>
+          <div id="harness-list" class="harness-list"></div>
+          <div class="section-label tool-label"><span>CAPABILITY BROKER</span><small id="tool-count">0 GRANTED</small></div>
+          <div id="tool-list" class="tool-list"></div>
+          <div class="registry-note"><b>DEFAULT DENY</b><p>Harnesses only propose typed actions. WINCH validates targets, waits for a separate human approval, executes without a shell, and records a receipt.</p></div>
+        </aside>
+      </div>
+
+      <section class="ledger" id="ledger">
+        <div class="section-label"><span>EXECUTION LEDGER</span><small>ROUTE · FALLBACK · VERIFY · RECEIPT</small></div>
+        <ol id="event-list" class="event-list"></ol>
+      </section>
+    </main>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

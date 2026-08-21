@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+.DS_Store
+.playwright-cli/
+data/
+config/action-grants.json
+config/harnesses.json
+node_modules/
+output/
+*.log
+*.sqlite*

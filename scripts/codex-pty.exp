@@ -1,0 +1,10 @@
+#!/usr/bin/expect -f
+set timeout 60
+spawn -noecho {*}$argv
+expect {
+  timeout { exit 124 }
+  eof {
+    catch wait result
+    exit [lindex $result 3]
+  }
+}

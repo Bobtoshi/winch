@@ -1,0 +1,16 @@
+{
+  "harnesses": [
+    {
+      "id": "my-harness",
+      "name": "My local harness",
+      "kind": "custom_cli",
+      "enabled": false,
+      "command": "/absolute/path/to/my-harness",
+      "args": ["plan", "--request", "{{requestFile}}"],
+      "capabilities": ["general", "research"],
+      "environment": ["MY_HARNESS_API_KEY"],
+      "priority": 5,
+      "cost": 2
+    }
+  ]
+}

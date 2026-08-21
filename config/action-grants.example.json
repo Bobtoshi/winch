@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "tools": {
+    "files.list": false,
+    "files.read": false,
+    "files.write": false,
+    "files.move": false,
+    "files.trash": false,
+    "web.fetch": false,
+    "macos.notify": false,
+    "macos.open_app": false,
+    "shortcuts.run": false,
+    "calendar.create_event": false,
+    "imessage.send": false,
+    "command.run": false,
+    "codex.workspace_task": false,
+    "connector.invoke": false,
+    "api.request": false
+  },
+  "fileRoots": [
+    { "name": "workspace", "path": "../", "writable": false }
+  ],
+  "webHosts": ["example.com"],
+  "apps": ["Safari"],
+  "shortcuts": ["My reviewed shortcut"],
+  "calendars": ["Home"],
+  "imessageRecipients": ["+15555550123"],
+  "commands": {
+    "system-version": {
+      "executable": "/usr/bin/sw_vers",
+      "args": [],
+      "timeoutMs": 10000
+    }
+  },
+  "apis": {
+    "example": {
+      "baseUrl": "https://api.example.com",
+      "apiKeyEnv": "EXAMPLE_API_KEY",
+      "apiKeyHeader": "Authorization",
+      "apiKeyPrefix": "Bearer ",
+      "methods": ["GET", "POST"],
+      "pathPrefixes": ["/v1/"]
+    }
+  },
+  "connectors": {
+    "example": {
+      "executable": "../scripts/example-connector.mjs",
+      "args": ["{{requestFile}}"],
+      "operations": ["echo"],
+      "environment": [],
+      "timeoutMs": 10000
+    }
+  }
+}
