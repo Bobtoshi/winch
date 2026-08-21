@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AdapterRunner } from "./adapters.mjs";
 import { ActionBroker } from "./action-broker.mjs";
+import { BridgeAccess, projectBridgeRun } from "./bridge.mjs";
 import { loadEnv } from "./env.mjs";
 import { Orchestrator } from "./orchestrator.mjs";
 import { HarnessRegistry } from "./registry.mjs";
@@ -34,6 +35,7 @@ const router = new HarnessRouter(registry);
 const runner = new AdapterRunner();
 const broker = new ActionBroker({ configPath: actionConfigPath, enabled: process.env.WINCH_ACTIONS_ENABLED === "1" });
 const orchestrator = new Orchestrator({ store, registry, router, runner, broker });
+const bridge = new BridgeAccess({ token: process.env.WINCH_BRIDGE_TOKEN || "" });
 const publicDir = path.join(root, "public");
 const mime = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml" };
 
@@ -95,12 +97,40 @@ function stateResponse() {
       mode: process.env.WINCH_LIVE_HARNESSES === "1" ? "live-enabled" : "simulation-only",
       harnesses: registry.publicState(),
       tools: broker.catalog(),
-      protocol: "proposal-and-action-v2"
+      protocol: "proposal-and-action-v2",
+      bridge: bridge.status()
     }
   };
 }
 
 async function handleApi(req, res, url) {
+  if (url.pathname.startsWith("/api/bridge/")) {
+    if (!bridge.enabled()) return json(res, 404, { error: "Bridge is disabled." });
+    if (!bridge.authenticate(req.headers.authorization)) return json(res, 401, { error: "Bridge authentication failed." });
+    if (req.method === "POST" && !String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) throw Object.assign(new Error("Content-Type must be application/json."), { statusCode: 415 });
+    if (req.method === "GET" && url.pathname === "/api/bridge/status") {
+      return json(res, 200, { bridge: bridge.status(), harnesses: registry.publicState() });
+    }
+    if (req.method === "POST" && url.pathname === "/api/bridge/runs") {
+      const body = await readBody(req);
+      if (typeof body.intent !== "string") throw Object.assign(new Error("Intent must be a string."), { statusCode: 400 });
+      const created = await orchestrator.createRun(body.intent, {
+        source: "cplug-bridge",
+        preferredHarness: typeof body.preferredHarness === "string" ? body.preferredHarness : null,
+        approvedBy: body.operatorApproved === true ? "C-Plug operator approval" : null,
+        withRunId: true
+      });
+      return json(res, 201, projectBridgeRun(created.state, created.runId));
+    }
+    const approval = url.pathname.match(/^\/api\/bridge\/approvals\/W?(\d{6})$/i);
+    if (req.method === "POST" && approval) {
+      const body = await readBody(req);
+      if (!["approve", "reject"].includes(body.decision)) throw Object.assign(new Error("Decision must be approve or reject."), { statusCode: 400 });
+      const decided = await orchestrator.decideByCode(approval[1], body.decision);
+      return json(res, 200, projectBridgeRun(decided.state, decided.runId));
+    }
+    return json(res, 404, { error: "Bridge route not found." });
+  }
   if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, stateResponse());
   if (req.method === "POST" && url.pathname === "/api/runs") {
     if (!String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) throw Object.assign(new Error("Content-Type must be application/json."), { statusCode: 415 });
@@ -157,6 +187,7 @@ server.listen(port, host, () => {
   console.log(`Mode: ${process.env.WINCH_LIVE_HARNESSES === "1" ? "live harnesses enabled" : "simulation only"}`);
   console.log(`Harnesses: ${registry.publicState().map((item) => `${item.id}:${item.status}`).join(", ")}`);
   console.log(`Action broker: ${process.env.WINCH_ACTIONS_ENABLED === "1" ? "enabled" : "locked"}`);
+  console.log(`C-Plug bridge: ${bridge.status().status}`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => server.close(() => process.exit(0)));

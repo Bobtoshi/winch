@@ -21,19 +21,20 @@ export class Orchestrator {
     throw new Error("Could not allocate an approval code.");
   }
 
-  async createRun(intent, { source = "web", preferredHarness = null } = {}) {
+  async createRun(intent, { source = "web", preferredHarness = null, approvedBy = null, withRunId = false } = {}) {
     const inspection = inspectIntent(intent);
     const run = {
       id: id("run"), intent: String(intent ?? "").trim(), source, capability: null,
       risk: inspection.risk, status: inspection.allowed ? "routing" : "blocked", route: null,
       approvalCode: null, createdAt: now()
     };
+    const finish = (state) => withRunId ? { runId: run.id, state } : state;
     this.store.createRun(run);
     this.store.addEvent({ runId: run.id, kind: "request", message: "Intent received. Policy and capability routing started." });
     if (!inspection.allowed) {
       this.store.updateRun(run.id, { result: { summary: inspection.reason } });
       this.store.addEvent({ runId: run.id, kind: "blocked", message: inspection.reason });
-      return this.store.state();
+      return finish(this.store.state());
     }
 
     let route;
@@ -42,21 +43,33 @@ export class Orchestrator {
     } catch (error) {
       this.store.updateRun(run.id, { status: "failed", result: { summary: error.message, code: error.code || "routing_failed" } });
       this.store.addEvent({ runId: run.id, kind: "failed", message: "No eligible harness route was available." });
-      return this.store.state();
+      return finish(this.store.state());
     }
 
-    const approvalCode = inspection.requiresApproval ? this.#approvalCode() : null;
+    const preapproved = inspection.requiresApproval && typeof approvedBy === "string" && approvedBy.length > 0;
+    const approvalCode = inspection.requiresApproval && !preapproved ? this.#approvalCode() : null;
     this.store.updateRun(run.id, {
       capability: route.capability, route, approvalCode,
-      status: inspection.requiresApproval ? "awaiting_approval" : "routed"
+      status: inspection.requiresApproval && !preapproved ? "awaiting_approval" : "routed",
+      ...(preapproved ? { decidedAt: now() } : {})
     });
     this.store.addEvent({ runId: run.id, kind: "route", message: `${route.primary} selected for ${route.capability.replace("_", " ")}${route.verifier ? ` with ${route.verifier} verification` : ""}.` });
-    if (inspection.requiresApproval) {
+    if (inspection.requiresApproval && !preapproved) {
       this.store.addEvent({ runId: run.id, kind: "approval", message: `Dispatch is waiting for human approval code ${approvalCode}.` });
-      return this.store.state();
+      return finish(this.store.state());
     }
+    if (preapproved) this.store.addEvent({ runId: run.id, kind: "approved", message: `Dispatch approval was relayed by ${approvedBy}.` });
     await this.#execute(run.id);
-    return this.store.state();
+    return finish(this.store.state());
+  }
+
+  async decideByCode(code, decision) {
+    const normalized = String(code || "");
+    const action = this.store.getActionByCode(normalized);
+    if (action) return { runId: action.runId, state: await this.decideAction(action.id, decision) };
+    const run = this.store.getRunByCode(normalized);
+    if (run) return { runId: run.id, state: await this.decide(run.id, decision) };
+    throw Object.assign(new Error("Approval code not found."), { statusCode: 404 });
   }
 
   async decide(runId, decision) {
@@ -127,6 +140,27 @@ export class Orchestrator {
       return;
     }
 
+    const advisory = [];
+    if (route.strategy === "council") {
+      const adviserRuns = (route.advisers || []).map(async (harnessId) => {
+        const adviser = this.registry.get(harnessId);
+        if (!adviser) return null;
+        const attemptId = id("attempt");
+        this.store.createAttempt({ id: attemptId, runId, harnessId: adviser.id, harnessName: adviser.name, role: "advisor", startedAt: now() });
+        try {
+          const result = await this.runner.run(adviser, run.intent, { previousResult: primaryResult.result, peerRole: "advisor", actionCatalog: this.broker?.catalog() || [] });
+          this.store.finishAttempt(attemptId, "completed", { result });
+          this.store.addEvent({ runId, kind: "advisory", message: `${adviser.name} returned an independent council opinion.` });
+          return { harness: adviser.id, result };
+        } catch (error) {
+          this.store.finishAttempt(attemptId, "failed", { errorCode: error.code || "advisor_failed" });
+          this.store.addEvent({ runId, kind: "warning", message: `${adviser.name} failed safely during the council pass.` });
+          return null;
+        }
+      });
+      advisory.push(...(await Promise.all(adviserRuns)).filter(Boolean));
+    }
+
     let verification = null;
     if (route.verifier) {
       const verifier = this.registry.get(route.verifier);
@@ -134,7 +168,10 @@ export class Orchestrator {
         const attemptId = id("attempt");
         this.store.createAttempt({ id: attemptId, runId, harnessId: verifier.id, harnessName: verifier.name, role: "verifier", startedAt: now() });
         try {
-          verification = await this.runner.run(verifier, run.intent, { previousResult: primaryResult.result, actionCatalog: this.broker?.catalog() || [] });
+          const councilContext = advisory.length
+            ? [primaryResult.result, ...advisory.map((item) => `${item.harness}: ${item.result.result}`)].join("\n\n").slice(0, 8_000)
+            : primaryResult.result;
+          verification = await this.runner.run(verifier, run.intent, { previousResult: councilContext, peerRole: advisory.length ? "council_synthesizer" : "verifier", actionCatalog: this.broker?.catalog() || [] });
           this.store.finishAttempt(attemptId, "completed", { result: verification });
           this.store.addEvent({ runId, kind: "verified", message: `${verifier.name} completed an independent proposal verification pass.` });
         } catch (error) {
@@ -146,7 +183,7 @@ export class Orchestrator {
 
     this.store.updateRun(runId, {
       status: "completed",
-      result: { selectedHarness: selectedHarness.id, primary: primaryResult, verification }
+      result: { selectedHarness: selectedHarness.id, primary: primaryResult, advisory, verification }
     });
     if (this.broker) {
       for (const proposal of primaryResult.proposedActions || []) {

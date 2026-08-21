@@ -5,6 +5,7 @@ import { classifyIntent, HarnessRouter } from "../src/router.mjs";
 const harnesses = [
   { id: "sim", name: "Simulation", kind: "simulation", capabilities: ["code", "general"], enabled: true, available: true, priority: 8, cost: 1, reliability: 0.99 },
   { id: "live", name: "Live", kind: "custom_cli", capabilities: ["code", "general"], enabled: true, available: true, priority: 4, cost: 3, reliability: 0.9 },
+  { id: "peer", name: "Peer", kind: "simulation", capabilities: ["code", "general"], enabled: true, available: true, priority: 6, cost: 1, reliability: 0.95 },
   { id: "verify", name: "Verify", kind: "simulation", capabilities: ["verify"], enabled: true, available: true, priority: 5, cost: 1, reliability: 0.95 }
 ];
 const registry = { list: () => harnesses };
@@ -18,7 +19,7 @@ test("intent classification selects a bounded capability", () => {
 test("live harnesses outrank simulations when explicitly enabled", () => {
   const route = new HarnessRouter(registry).route("Fix this code");
   assert.equal(route.primary, "live");
-  assert.deepEqual(route.fallbacks, ["sim"]);
+  assert.deepEqual(route.fallbacks, ["sim", "peer"]);
 });
 
 test("a verification route is attached independently", () => {
@@ -29,4 +30,12 @@ test("a verification route is attached independently", () => {
 test("operator preference overrides ranking only when eligible", () => {
   const route = new HarnessRouter(registry).route("Fix this code", { preferredHarness: "sim" });
   assert.equal(route.primary, "sim");
+});
+
+test("council requests attach independent advisers without replacing the primary", () => {
+  const route = new HarnessRouter(registry).route("Ask multiple agents to review this code and reach consensus", { requireVerification: true });
+  assert.equal(route.strategy, "council");
+  assert.equal(route.primary, "live");
+  assert.deepEqual(new Set(route.advisers), new Set(["peer", "sim"]));
+  assert.equal(route.verifier, "verify");
 });

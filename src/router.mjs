@@ -37,11 +37,17 @@ export class HarnessRouter {
     const verifier = (requireVerification || /\b(verify|review|audit|double-check)\b/i.test(intent))
       ? this.registry.list().filter((item) => item.available && item.enabled && item.id !== primary.id && item.capabilities.includes("verify")).sort((a, b) => score(b, "verify") - score(a, "verify"))[0] || null
       : null;
+    const councilRequested = /\b(committee|council|consensus|multiple (?:ais?|agents?|models?|harnesses)|all (?:my )?(?:ais?|agents?|models?|harnesses))\b/i.test(intent);
+    const advisers = councilRequested
+      ? candidates.filter((item) => item.id !== primary.id && item.id !== verifier?.id).slice(0, 2)
+      : [];
     return {
       capability,
       primary: primary.id,
       fallbacks: candidates.slice(1, 3).map((item) => item.id),
       verifier: verifier?.id || null,
+      strategy: councilRequested ? "council" : "single",
+      advisers: advisers.map((item) => item.id),
       rationale: `${primary.name} ranked highest for ${capability.replace("_", " ")} under the current availability, priority, reliability, and cost policy.`,
       rankings: candidates.slice(0, 4).map((item) => ({ id: item.id, name: item.name, score: score(item, capability), mode: item.kind === "simulation" ? "simulation" : "live" }))
     };

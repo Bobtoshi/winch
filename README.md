@@ -27,12 +27,14 @@ WINCH includes:
 - simulated, Codex CLI, and custom CLI harness adapters;
 - deterministic routing across capability, availability, priority, reliability, and cost;
 - independent fallback and verification routes;
+- an optional council strategy that runs independent adviser harnesses in parallel and gives a separate verifier the combined opinions to synthesize;
 - a local SQLite receipt ledger;
 - a loopback-only web UI with Host, Origin, CSP, framing, and body-size controls;
 - typed actions for scoped files, HTTPS retrieval, arbitrary granted APIs, macOS notifications and apps, Apple Shortcuts, Calendar, iMessage, predeclared command recipes, workspace-writing Codex tasks, and reviewed local connectors;
 - separate human approval for harness dispatch and every external action;
 - recoverable trash rather than permanent file deletion;
 - exact allowlists for roots, hosts, apps, shortcuts, calendars, recipients, and commands.
+- an authenticated loopback bridge that lets C-Plug act as a phone-first iMessage, WhatsApp, and voice client without weakening WINCH's action gate.
 
 Harnesses never receive raw operating-system authority. They return proposals using protocol v2. The broker validates the type and target, waits for approval, executes using bounded native APIs or `execFile` without a shell, and records the receipt.
 
@@ -82,6 +84,38 @@ WINCH_ACTIONS_ENABLED=1
 ```
 
 Every action still stops in the Human Gate. An enabled capability is permission to offer it for approval, not permission to run automatically.
+
+## Use C-Plug as the phone and messaging surface
+
+Generate a shared secret:
+
+```bash
+openssl rand -hex 32
+```
+
+Put it in WINCH's ignored, owner-only `.env` as `WINCH_BRIDGE_TOKEN`. Put the same value in C-Plug's `.env` as `CPLUG_WINCH_TOKEN`, set `CPLUG_WINCH_ENABLED=1`, and restart both services.
+
+The bridge is loopback-only and requires the exact bearer secret. A C-Plug approval can authorize the initial proposal-mode harness dispatch, avoiding a redundant second dispatch prompt. It cannot authorize any action the harness proposes: those actions retain separate WINCH approval codes, namespaced as `W123456`, which C-Plug can relay through iMessage or WhatsApp.
+
+The complete bridge contract is documented in [BRIDGE.md](BRIDGE.md).
+
+This creates a layered boundary:
+
+```text
+phone / voice / iMessage / WhatsApp
+                ↓
+              C-Plug
+       approve harness dispatch
+                ↓ authenticated loopback bridge
+               WINCH
+ route → fallback → independent verifier
+                ↓
+       approve each typed action
+                ↓
+              receipt
+```
+
+Ask for “a council,” “multiple agents,” “all my AIs,” or “consensus” to activate the council route. WINCH keeps one primary, runs up to two distinct advisers, and passes their bounded opinions to an independent verifier. Only the primary may propose actions, so adding more models does not multiply execution authority.
 
 `command.run` accepts only named recipes with fixed executables and argument templates. WINCH never passes a harness-authored command string to a shell.
 

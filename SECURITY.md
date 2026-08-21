@@ -21,6 +21,7 @@ WINCH is a security boundary around independent AI harnesses. Report vulnerabili
 - Universal connectors expose exact reviewed operation names rather than arbitrary executable or shell selection.
 - Workspace-writing Codex tasks are confined to a named writable root and require an action approval.
 - API keys are read only at execution from named environment variables; API origins, methods, and path prefixes are fixed by private grants, and keys never enter proposals or receipts.
+- The optional C-Plug bridge remains loopback-only, requires an exact shared bearer secret of at least 32 characters, returns state for only the delegated run, and never treats upstream dispatch approval as approval for a proposed broker action.
 
 ## Capability grants
 
