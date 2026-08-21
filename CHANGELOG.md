@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 — 2026-08-21
+
+- Updated immutable GitHub Actions pins to the current Node 24-based official releases, removing the platform deprecation warning from the first protected release.
+
 ## 0.2.1 — 2026-08-21
 
 - First public release.
