@@ -1,0 +1,22 @@
+{
+  "name": "winch-control",
+  "version": "0.2.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "author": {
+    "name": "Bobtoshi",
+    "email": "ellmusk@icloud.com"
+  },
+  "contributors": [],
+  "type": "module",
+  "description": "A local control plane for multiple AI harnesses.",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "dev": "node --watch src/server.mjs",
+    "test": "node --test",
+    "check:public": "node scripts/check-public-tree.mjs"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}
