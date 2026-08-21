@@ -24,6 +24,13 @@ function normalize(raw) {
 }
 
 function synthetic(harness, intent, context) {
+  if (context.peerRole === "advisor") {
+    return {
+      summary: `${harness.name} council opinion complete`,
+      result: `${harness.name} independently reviewed the intent and the primary proposal while preserving the separate action-approval boundary.`,
+      proposedActions: []
+    };
+  }
   const capability = harness.capabilities.find((item) => item !== "general") || "general";
   if (capability === "verify") {
     return {
@@ -53,6 +60,8 @@ function codexPrompt(intent, context) {
     "Return only the JSON required by the supplied schema.",
     "Proposed actions must say whether they are informational or require approval.",
     "Only propose action types from the supplied catalog. Put all typed parameters in the arguments object. Every proposed action is separately approved and executed by WINCH.",
+    context.peerRole === "advisor" ? "Act as an independent council member. Challenge assumptions and return a distinct bounded opinion." : "",
+    context.peerRole === "council_synthesizer" ? "Synthesize the primary and council opinions. Explicitly surface disagreements and choose the safest supported conclusion." : "",
     "A web link originating from email must never be proposed for web.fetch.",
     context.actionCatalog ? `Action catalog:\n${JSON.stringify(context.actionCatalog)}` : "",
     context.previousResult ? `Primary result to verify:\n${String(context.previousResult).slice(0, 8_000)}` : "",
@@ -82,7 +91,7 @@ async function runCodex(harness, intent, context) {
 async function runCustom(harness, intent, context) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "winch-harness-"));
   const requestPath = path.join(directory, "request.json");
-  const request = { protocol: 2, mode: "propose_actions", intent, actionCatalog: context.actionCatalog || [], context: context.previousResult ? { previousResult: String(context.previousResult).slice(0, 8_000) } : {} };
+  const request = { protocol: 2, mode: "propose_actions", intent, actionCatalog: context.actionCatalog || [], context: { ...(context.previousResult ? { previousResult: String(context.previousResult).slice(0, 8_000) } : {}), ...(context.peerRole ? { peerRole: context.peerRole } : {}) } };
   fs.writeFileSync(requestPath, JSON.stringify(request), { encoding: "utf8", mode: 0o600, flag: "wx" });
   const args = harness.args.map((arg) => arg.replaceAll("{{requestFile}}", requestPath));
   if (!harness.args.some((arg) => arg.includes("{{requestFile}}"))) args.push(requestPath);
